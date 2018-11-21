@@ -3,7 +3,7 @@ from sqlalchemy import Column, Integer, String, create_engine, LargeBinary
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 
-from settings import db_tablename
+from settings import db_tablename, db_params
 
 Base = declarative_base()
 
@@ -42,11 +42,12 @@ class DBManager:
     dialect = 'mysql'
     driver = 'mysqldb'
 
-    def __init__(self, host, username, password, db_name):
+    def __init__(self, host, username, password, db_name, port=3306):
         self.host = host
         self.username = username
         self.password = password
         self.db_name = db_name
+        self.port = port
         self.Session = None
 
         print("Initializing database...")
@@ -54,11 +55,11 @@ class DBManager:
         print("Initialization complete!\n")
 
     def db_url(self):
-        url_base = '{dialect}+{driver}://{username}:{password}@{host}/{db}?charset=utf8'
+        url_base = '{dialect}+{driver}://{username}:{password}@{host}:{port}/{db}?charset=utf8'
         url = url_base.format(
             dialect=self.dialect, driver=self.driver,
             username=self.username, password=self.password,
-            host=self.host, db=self.db_name
+            host=self.host, db=self.db_name, port=self.port
         )
         return url
 
@@ -72,3 +73,9 @@ class DBManager:
         session = self.Session()
         queryset = session.query(Image).all()
         return queryset
+
+
+if __name__ == '__main__':
+    db = DBManager(**db_params)
+    image_records = db.list_images()
+    print(len(image_records))

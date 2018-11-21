@@ -57,7 +57,8 @@ def load_image(path, dim=Hashnet.MIN_RESOLUTION):
     ))
     if size > dim:
         image.thumbnail((dim, dim), Image.ANTIALIAS)
-    return np.array(image) / 255
+    array = np.array(image) / 255
+    return array[:, :, :3]
 
 
 def ensure_dir(path):

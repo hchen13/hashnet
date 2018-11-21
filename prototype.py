@@ -21,7 +21,7 @@ class Hashnet:
     MIN_RESOLUTION = 160
     IMAGE_SHAPE = (MIN_RESOLUTION, MIN_RESOLUTION, 3)
     HASH_LAYER = 'code'
-    FEATURE_LAYER = 'feature'
+    FEATURE_LAYER = 'flatten_1'
 
 
     def __init__(self, hash_length=1024, pre_code_layers=1, post_code_layers=0, hidden_size=256, keep_prob=.7):

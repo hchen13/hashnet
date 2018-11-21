@@ -1,13 +1,32 @@
+import os
+
 from sqlalchemy import or_
+from sshtunnel import SSHTunnelForwarder
 
 from db import DBManager, Image
 from oss import Storage
 from prototype import Hashnet
-from settings import db_params, oss_params
-
+from settings import db_params, oss_params, env
 
 if __name__ == '__main__':
-
+    server = None
+    if env == 'production':
+        if "MACHINE_ROLE" in os.environ:
+            ssh_private_key = '/home/ethan/.ssh/mac_id_rsa'
+        else:
+            ssh_private_key = '/Users/ethan/.ssh/id_rsa'
+        server = SSHTunnelForwarder(
+            ("121.41.12.158", 22),
+            ssh_username='root',
+            ssh_pkey=ssh_private_key,
+            remote_bind_address=(
+                db_params['host'],
+                3306
+            )
+        )
+        server.start()
+        db_params['host'] = server.local_bind_host
+        db_params['port'] = server.local_bind_port
     db = DBManager(**db_params)
     storage = Storage(**oss_params)
     hashnet = Hashnet()
@@ -56,3 +75,6 @@ if __name__ == '__main__':
 
     session.close()
     print("Done!\n")
+
+    if server is not None:
+        server.stop()

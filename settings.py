@@ -19,16 +19,17 @@ db_settings = {
     },
     'production': {
         'configs': {
-            'host': 'rdsbuezp0btf932d168jo.mysql.rds.aliyuncs.com',
+            'host': 'rdsmbz4j70308771x489.mysql.rds.aliyuncs.com',
             'username': 'fishsaying',
-            'password': '6uePDKEKQqT1yFKkLInY',
+            'password': 'TGl69Xym3cz2E8GRZNUp',
             'db_name': 'db_content',
         },
         'table': 'ir_upload_image'
     }
 }
 
-env = 'test'
+
+env = 'production'
 db_params = db_settings[env]['configs']
 db_tablename = db_settings[env]['table']
 
