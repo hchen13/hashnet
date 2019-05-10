@@ -1,5 +1,6 @@
 import os
 
+import progressbar
 from sqlalchemy import or_
 from sshtunnel import SSHTunnelForwarder
 
@@ -45,8 +46,10 @@ if __name__ == '__main__':
 
     print("Processing images...")
     batch_size = 32
+
+    widgets = [progressbar.Percentage(), " ", progressbar.Bar(), " ", progressbar.ETA()]
+    pbar = progressbar.ProgressBar(maxval=n, widgets=widgets, term_width=50).start()
     for i in range(0, n, batch_size):
-        print("{}/{}".format(i + 1, n))
         batch = results[i : i + batch_size]
         rows = []
         images = []
@@ -64,16 +67,18 @@ if __name__ == '__main__':
 
         hashcodes, features = hashnet.extract_features(*images)
 
-        for i in range(len(images)):
-            hash = hashcodes[i].tobytes()
-            vec = features[i].tobytes()
-            row = rows[i]
+        for j in range(len(images)):
+            hash = hashcodes[j].tobytes()
+            vec = features[j].tobytes()
+            row = rows[j]
             row.hash = hash
             row.features = vec
 
         session.commit()
+        pbar.update(i)
 
     session.close()
+    pbar.finish()
     print("Done!\n")
 
     if server is not None:

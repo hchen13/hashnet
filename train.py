@@ -1,34 +1,35 @@
 import os
 
 import tensorflow as tf
+from keras import optimizers, metrics
 from keras.callbacks import TensorBoard
 from keras.preprocessing.image import ImageDataGenerator
+from keras.utils.generic_utils import to_list
 
 from prototype import Hashnet
-from utils import ensure_dir
+from utils import ensure_dir, Chart
 
 if "MACHINE_ROLE" in os.environ and os.environ['MACHINE_ROLE'] == 'trainer':
     IMAGE_ROOT = "/home/ethan/Pictures/文化物_"
 else:
-    IMAGE_ROOT = "/Users/ethan/Pictures/datasets/文化物_"
-
+    # IMAGE_ROOT = "/Users/ethan/Pictures/datasets/文化物_"
+    IMAGE_ROOT = "/Users/ethan/datasets/marvel"
 
 TRAIN_DATA_DIR = os.path.join(IMAGE_ROOT, 'train')
 VALID_DATA_DIR = os.path.join(IMAGE_ROOT, 'valid')
 
 
-epochs = 200
+def normalize_image(images):
+    return images / 127.5 - 1
+
+
+def restore_image(images):
+    return (images + 1) / 2
 
 
 def load():
-    idg = ImageDataGenerator(
-        featurewise_center=False,
-        samplewise_center=False,
-        featurewise_std_normalization=False,
-        samplewise_std_normalization=False,
-        zca_epsilon=1e-6,
-        zca_whitening=False,
-        rotation_range=0,
+    train_gen = ImageDataGenerator(
+        rotation_range=10,
         width_shift_range=0,
         height_shift_range=0,
         brightness_range=None,
@@ -36,23 +37,24 @@ def load():
         zoom_range=0.0,
         channel_shift_range=0.0,
         fill_mode='nearest',
-        cval=0.0,
-        horizontal_flip=False,
+        horizontal_flip=True,
         vertical_flip=False,
         rescale=None,
-        preprocessing_function=lambda x: x / 255,
-        data_format=None,
+        preprocessing_function=normalize_image,
         validation_split=0.25
     )
+    valid_gen = ImageDataGenerator(
+        preprocessing_function=normalize_image,
+    )
 
-    train_batches = idg.flow_from_directory(
+    train_batches = train_gen.flow_from_directory(
         TRAIN_DATA_DIR,
         target_size=(Hashnet.MIN_RESOLUTION, Hashnet.MIN_RESOLUTION),
         color_mode='rgb',
         batch_size=32,
         shuffle=True,
     )
-    valid_batches = idg.flow_from_directory(
+    valid_batches = valid_gen.flow_from_directory(
         VALID_DATA_DIR,
         target_size=(Hashnet.MIN_RESOLUTION, Hashnet.MIN_RESOLUTION),
         color_mode='rgb',
@@ -65,67 +67,88 @@ def load():
 train_batches, valid_batches, num_classes = load()
 
 
-class History(TensorBoard):
-    
-    def __init__(self, *args, **kwargs):
-        super(History, self).__init__(*args, **kwargs)
-        self.global_steps = 0
+def train(experiment_name, engine, learning_rate, epochs, eval_steps=None):
+    model = engine.create_model(num_classes)
+    optimizer = optimizers.Adam(lr=learning_rate)
+    model.compile(optimizer=optimizer, loss='categorical_crossentropy', metrics=['acc', metrics.top_k_categorical_accuracy])
 
-    def write_log(self, names, logs, num):
-        for name, value in zip(names, logs):
-            summary = tf.Summary()
-            summary_value = summary.value.add()
-            summary_value.simple_value = value
-            summary_value.tag = name
-            self.writer.add_summary(summary, num)
-            self.writer.flush()
+    trial_name = '{}-{}'.format(engine.model_name, experiment_name)
+    print('\n[info] initializing training session, code name: [{}]'.format(trial_name.upper()))
 
-    def on_batch_end(self, _, logs=None):
-        train_loss = logs['loss']
-        train_acc = logs['acc']
-        self.write_log(['loss/train', 'acc/train'], [train_loss, train_acc], self.global_steps)
-        self.global_steps += 1
-
-    def on_epoch_end(self, epoch, logs=None):
-        self.write_log(['loss/validation', 'acc/validation'], [logs['val_loss'], logs['val_acc']], epoch)
-
-
-def train(hash_length, pre_layers, post_layers, hidden_size, keep_prob, learning_rate):
-    hashnet = Hashnet(
-        hash_length,
-        pre_code_layers=pre_layers,
-        post_code_layers=post_layers,
-        hidden_size=hidden_size,
-        keep_prob=keep_prob
+    logdir = os.path.join('./logs/', trial_name)
+    train_chart = Chart(
+        log_dir=os.path.join(logdir, 'train'),
+        histogram_freq=0,
+        write_graph=False,
+        write_images=True
     )
-    hashnet.create_model(num_classes, learning_rate)
-    logdir = os.path.join('./logs', hashnet.model_name)
-    tb = History(log_dir=logdir, histogram_freq=0, write_graph=False, write_images=True)
-
-    hashnet.model.fit_generator(
-        train_batches,
-        epochs=epochs,
-        validation_data=valid_batches,
-        callbacks=[tb]
+    valid_chart = Chart(
+        log_dir=os.path.join(logdir, 'validation'),
+        histogram_freq=0,
+        write_graph=False,
+        write_images=True
     )
+
+    def display_on_chart(outputs, chart, num):
+        logs = {}
+        outputs = to_list(outputs)
+        for l, o in zip(model.metrics_names, outputs):
+            logs[l] = o
+        chart.draw(logs, num)
+
+    train_chart.set_model(model)
+    valid_chart.set_model(model)
+
+    steps_per_epoch = len(train_batches)
+    global_steps = 0
+    min_acc = 70
+
+    for ep in range(epochs):
+        print("Epoch {}/{}".format(ep + 1, epochs))
+        for batch_num in range(steps_per_epoch):
+            x_batch, y_batch = train_batches[batch_num]
+            global_steps += 1
+            outs = model.train_on_batch(x_batch, y_batch)
+
+            if batch_num % 10 == 0:
+                progress = batch_num / steps_per_epoch * 100
+                print("steps: {}/{} | progress: {:.2f}%".format(batch_num, steps_per_epoch, progress))
+
+            if global_steps % eval_steps == 0:
+                print('\n[info] validating...')
+                val_outs = model.evaluate_generator(
+                    valid_batches,
+                    len(valid_batches),
+                    workers=0,
+                    verbose=1
+                )
+                display_on_chart(outs, train_chart, global_steps // eval_steps)
+                display_on_chart(val_outs, valid_chart, global_steps // eval_steps)
+
+        val_acc = val_outs[2] * 100
+        if val_acc > min_acc:
+            print('\n[info] saving intermediate model, rank-5 accuracy: {:.2f}%'.format(val_acc))
+            ensure_dir('models')
+            engine.save("models/tmp.h5")
+            min_acc = val_acc
+
     ensure_dir('models')
-    hashnet.save("models/final.h5")
+    engine.save("models/final.h5")
 
 
 if __name__ == '__main__':
-
-    # for pre in [0, 1, 2]:
-    #     for post in [0, 1, 2]:
-    #         if pre + post == 0:
-    #             continue
-    #         train(4096, pre, post, 2048, .7, learning_rate=1e-3)
-
     train_params = {
-        'hash_length': 4096,
-        'hidden_size': 2048,
-        'pre_layers': 2,
-        'post_layers': 1,
-        'keep_prob': 1,
-        'learning_rate': 1e-3
+        'learning_rate': 0.0003,
+        'epochs': 10,
+        'eval_steps': 100
     }
-    train(**train_params)
+
+    engine = Hashnet(
+        hash_length=4096,
+        pre_code_layers=0,
+        post_code_layers=1,
+        hidden_size=2048,
+        keep_prob=.6
+    )
+
+    train(experiment_name='trial2', engine=engine, **train_params)

@@ -4,6 +4,8 @@ from io import BytesIO
 
 import numpy as np
 from PIL import Image
+from keras.callbacks import TensorBoard
+import tensorflow as tf
 
 from prototype import Hashnet
 
@@ -46,7 +48,27 @@ def load_raw(bytes, dim=Hashnet.MIN_RESOLUTION):
 
 
 def load_image(path, dim=Hashnet.MIN_RESOLUTION):
+    from PIL import ExifTags
+
+    def _rotate(_img):
+        for orientation in ExifTags.TAGS.keys():
+            if ExifTags.TAGS[orientation] == 'Orientation':
+                break
+        try:
+            exif = dict(_img._getexif().items())
+        except:
+            return _img
+
+        if exif[orientation] == 3:
+            _img = _img.rotate(180, expand=True)
+        elif exif[orientation] == 6:
+            _img = _img.rotate(270, expand=True)
+        elif exif[orientation] == 8:
+            _img = _img.rotate(90, expand=True)
+        return _img
+
     image = Image.open(path)
+    image = _rotate(image)
     width, height = image.size
     size = min(width, height)
     image = image.crop((
@@ -64,3 +86,14 @@ def load_image(path, dim=Hashnet.MIN_RESOLUTION):
 def ensure_dir(path):
     if not os.path.exists(path):
         os.makedirs(path)
+
+
+class Chart(TensorBoard):
+    def draw(self, logs, num):
+        for name, value in logs.items():
+            summary = tf.Summary()
+            summary_value = summary.value.add()
+            summary_value.simple_value = value
+            summary_value.tag = name
+            self.writer.add_summary(summary, num)
+            self.writer.flush()

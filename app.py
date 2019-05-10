@@ -4,10 +4,13 @@ from flask import Flask, request
 from flask.json import jsonify
 
 from engine import Engine
+from oss import Storage
+from settings import oss_params
 from utils import load_base64
 
 app = Flask("hashnet server")
 engine = Engine()
+storage = Storage(**oss_params)
 
 
 @app.route("/test")
@@ -22,7 +25,7 @@ def match():
     if target_image is None:
         return jsonify({
             "success": False,
-            "message": "图片太小看不清, 请确保短边≥160px"
+            "message": "图片太小看不清, 请确保短边≥224px"
         })
     result, similarity = engine.search(target_image, page_size=500)
     if result is None:

@@ -1,10 +1,11 @@
 import os
 
 import numpy as np
-from keras import Model, optimizers
-from keras.applications import VGG16, VGG19, InceptionV3
-from keras.layers import Dense, Dropout, Flatten
+from keras import Model
+from keras.applications import VGG16, VGG19, InceptionV3, vgg16
+from keras.layers import Dense, Dropout, regularizers, GlobalAveragePooling2D, BatchNormalization, Flatten
 from keras.models import load_model
+from keras.utils import plot_model
 
 
 def binarize(vec):
@@ -17,11 +18,11 @@ BASE_DIR = os.path.dirname(__file__)
 
 class Hashnet:
 
-    BASE_MODEL = 'vgg16'
-    MIN_RESOLUTION = 160
+    BASE_MODEL = 'inceptionv3'
+    MIN_RESOLUTION = 224
     IMAGE_SHAPE = (MIN_RESOLUTION, MIN_RESOLUTION, 3)
     HASH_LAYER = 'code'
-    FEATURE_LAYER = 'flatten_1'
+    FEATURE_LAYER = 'features'
 
 
     def __init__(self, hash_length=1024, pre_code_layers=1, post_code_layers=0, hidden_size=256, keep_prob=.7):
@@ -42,20 +43,19 @@ class Hashnet:
 
     @property
     def model_name(self):
-        return '{base_model}+hash{hash_length}/{hidden_size}x({pre}{post})_{keep_prob}'.format(
+        pattern = '{base_model}_h{hash_length}xdense{hidden_size}'
+        return pattern.format(
             base_model=self.BASE_MODEL,
             hash_length=self.hash_length,
             hidden_size=self.hidden_size,
-            pre=self.pre_code_layers,
-            post="+{}".format(self.post_code_layers) if self.post_code_layers else "",
-            keep_prob=self.keep_prob
         )
 
     def _get_base_model(self):
         params = {
             'weights': 'imagenet',
             'include_top': False,
-            'input_shape': self.IMAGE_SHAPE
+            'input_shape': self.IMAGE_SHAPE,
+            # 'pooling': 'avg',
         }
         if self.BASE_MODEL.lower() == 'vgg16':
             return VGG16(**params)
@@ -64,7 +64,7 @@ class Hashnet:
         else:
             return InceptionV3(**params)
 
-    def create_model(self, num_classes, alpha=1e-2):
+    def create_model(self, num_classes):
         """
         Creates a neural network architecture with the given hyper-params
 
@@ -72,20 +72,22 @@ class Hashnet:
         :param alpha: learning rate, defaults to 0.01
         :return: untrained architecture
         """
+        l2_lambda = .01
+
         base_model = self._get_base_model()
         x = base_model.output
-        # bottleneck = GlobalAveragePooling2D()(x)
-        # bottleneck = Lambda(lambda y: squeeze(y, [1, 2]))(x)
-        bottleneck = Flatten(name='feature')(x)
 
+        bottleneck = GlobalAveragePooling2D(name=self.FEATURE_LAYER)(x)
         dense = Dropout(1 - self.keep_prob)(bottleneck)
 
         for i in range(self.pre_code_layers):
             dense = Dense(
                 self.hidden_size,
                 activation='relu',
+                kernel_regularizer=regularizers.l2(l2_lambda),
                 name='pre{}'.format(i + 1)
             )(dense)
+            dense = BatchNormalization()(dense)
             dense = Dropout(1 - self.keep_prob)(dense)
 
         code = Dense(
@@ -101,20 +103,25 @@ class Hashnet:
             dense = Dense(
                 self.hidden_size,
                 activation='relu',
+                kernel_regularizer=regularizers.l2(l2_lambda),
                 name='post{}'.format(i + 1)
             )(dense)
+            dense = BatchNormalization()(dense)
             dense = Dropout(1 - self.keep_prob)(dense)
 
-        predictions = Dense(num_classes, activation='softmax')(dense)
+        predictions = Dense(
+            num_classes,
+            activation='softmax',
+            kernel_regularizer=regularizers.l2(l2_lambda)
+        )(dense)
 
         model = Model(inputs=base_model.inputs, outputs=predictions)
-        for layer in base_model.layers[:]:
+        for layer in base_model.layers:
+            if layer.name == 'mixed5':
+                break
             layer.trainable = False
 
-        optimizer = optimizers.Adam(lr=alpha)
-        model.compile(optimizer=optimizer, loss='categorical_crossentropy', metrics=['acc'])
         self.model = model
-        self.learning_rate = alpha
         return model
 
     def save(self, path):
@@ -147,4 +154,5 @@ if __name__ == '__main__':
     }
     hashnet = Hashnet(**params)
     hashnet.create_model(30)
+    # plot_model(hashnet.model, show_layer_names=True, show_shapes=True)
     hashnet.model.summary()

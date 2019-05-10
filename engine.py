@@ -80,9 +80,9 @@ class Engine:
                 winner = matched
         session.close()
         tock = datetime.now()
-        print("\nSearching completed in {}".format(tock - tick))
+        print("\nSearching completed in {}".format(tock - tick), flush=True)
         if winner is None:
-            print("There is nothing found during the search, most likely because there's not images in the database")
+            print("There is nothing found during the search, most likely because there's not images in the database", flush=True)
             return None, None
-        print("Most similar image is {}\nwith cosine distance={}".format(winner, optimal_dist))
+        print("Most similar image is {}\nwith cosine distance={}".format(winner, optimal_dist), flush=True)
         return winner, 1 - optimal_dist
